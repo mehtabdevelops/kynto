@@ -11,14 +11,12 @@ import torch.nn.functional as F
 class KyntoConfig:
     block_size: int = 1024
     vocab_size: int = 50257
-
-    n_embd:    int = 1280
-    n_head:    int = 16
-    n_kv_head: int = 4
-    n_layer:   int = 36
-
-    dropout: float = 0.0
-    bias:    bool  = False
+    n_embd:     int = 1024
+    n_head:     int = 16
+    n_kv_head:  int = 4
+    n_layer:    int = 24
+    dropout:  float = 0.0
+    bias:      bool = False
 
 
 # -----------------------
@@ -77,7 +75,7 @@ class MultiheadAttention(nn.Module):
         self.c_proj = nn.Linear(config.n_embd, config.n_embd,                    bias=config.bias)
         self.c_proj.KYNTO_SCALE_INIT = 1  # ✅
 
-        cos, sin = precompute_rope(self.head_dim, config.block_size, device="cpu")
+        cos, sin = precompute_rope(self.head_dim, config.block_size, device="cpu")  # moved by .to(device)
         self.register_buffer("cos", cos)
         self.register_buffer("sin", sin)
 

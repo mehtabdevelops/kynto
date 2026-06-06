@@ -9,11 +9,11 @@ device     = 'cuda'
 batch_size = 4
 block_size = 1024
 max_iters  = 10000
-eval_every = 250
+eval_every = 8
 max_lr     = 3e-4
 min_lr     = 3e-5
 warmup     = 300
-accum_steps = 16
+accum_steps = 8
 
 os.makedirs('checkpoints', exist_ok=True)
 

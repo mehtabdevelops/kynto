@@ -2,14 +2,14 @@ import torch
 import numpy as np
 import math
 import os
-from model import kynto, kyntoConfig
+from model import Kynto, KyntoConfig
 
 # config
 device     = 'cuda'
-batch_size = 4
+batch_size = 32
 block_size = 1024
 max_iters  = 10000
-eval_every = 8
+eval_every = 250
 max_lr     = 3e-4
 min_lr     = 3e-5
 warmup     = 300
@@ -32,8 +32,8 @@ def get_batch(split):
     return x.to(device), y.to(device)
 
 # model
-config = kyntoConfig()
-model  = kynto(config).to(device)
+config = KyntoConfig()
+model  = Kynto(config).to(device)
 model =model.to(torch.float16)
 total  = sum(p.numel() for p in model.parameters()) / 1e6
 print(f'kynto — {total:.1f}M parameters')

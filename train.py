@@ -18,15 +18,20 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 batch_size = int(os.getenv("BATCH_SIZE", "4"))
 block_size = int(os.getenv("BLOCK_SIZE", "1024"))
 
-# ✅ UPDATED TO 50,000 STEPS
-max_iters = int(os.getenv("MAX_ITERS", "50000"))
+# 183,000 steps ≈ 3B tokens with batch_size=4, block_size=1024, accum_steps=4
+max_iters = int(os.getenv("MAX_ITERS", "183000"))
 
 eval_every = int(os.getenv("EVAL_EVERY", "10"))
-save_every = int(os.getenv("SAVE_EVERY", "250"))
 
-max_lr = float(os.getenv("MAX_LR", "3e-4"))
-min_lr = float(os.getenv("MIN_LR", "3e-5"))
-warmup = int(os.getenv("WARMUP", "300"))
+# Save every 2500 steps to avoid filling storage with 4.7GB checkpoints
+save_every = int(os.getenv("SAVE_EVERY", "2500"))
+
+# Safer LR for continuing after 50k steps
+# Previous 3e-4 was okay, but 1.5e-4 is safer for long continuation.
+max_lr = float(os.getenv("MAX_LR", "1.5e-4"))
+min_lr = float(os.getenv("MIN_LR", "2e-5"))
+
+warmup = int(os.getenv("WARMUP", "1000"))
 accum_steps = int(os.getenv("ACCUM_STEPS", "4"))
 
 train_path = os.getenv("TRAIN_PATH", "data/tokens_train.bin")
@@ -60,12 +65,17 @@ if len(train_data) <= block_size + 1:
 if len(val_data) <= block_size + 1:
     raise ValueError("Validation data is too small for the selected block_size.")
 
+tokens_per_update = batch_size * block_size * accum_steps
+
 print(f"train tokens: {len(train_data) / 1e9:.2f}B", flush=True)
 print(f"val tokens:   {len(val_data) / 1e6:.2f}M", flush=True)
-
 print(
     f"batch_size={batch_size}, block_size={block_size}, accum_steps={accum_steps}, "
-    f"tokens/update={batch_size * block_size * accum_steps:,}",
+    f"tokens/update={tokens_per_update:,}",
+    flush=True,
+)
+print(
+    f"target steps={max_iters:,}, approximate tokens={max_iters * tokens_per_update / 1e9:.2f}B",
     flush=True,
 )
 
@@ -128,7 +138,8 @@ def get_lr(step):
     if step < warmup:
         return max_lr * (step + 1) / warmup
 
-    decay = min(1.0, (step - warmup) / max(1, max_iters - warmup))
+    decay = (step - warmup) / max(1, max_iters - warmup)
+    decay = min(1.0, max(0.0, decay))
 
     return min_lr + 0.5 * (max_lr - min_lr) * (
         1 + math.cos(math.pi * decay)
@@ -155,44 +166,42 @@ def save_checkpoint(step, loss_accum):
         "optimizer": optimizer.state_dict(),
         "loss": loss_accum,
         "config": config,
+        "tokens_seen": step * tokens_per_update,
     }
 
     step_path = os.path.join(checkpoint_dir, f"kynto_step{step}.pt")
-    latest_path = os.path.join(checkpoint_dir, "latest.pt")
 
     torch.save(ckpt, step_path)
-    torch.save(ckpt, latest_path)
 
     print(f"✅ checkpoint saved: {step_path}", flush=True)
 
 
 # -----------------------
-# RESUME FROM LATEST CHECKPOINT
+# RESUME FROM LATEST NUMBERED CHECKPOINT
 # -----------------------
 start_step = 0
 
-latest_path = os.path.join(checkpoint_dir, "latest.pt")
 step_checkpoints = glob.glob(os.path.join(checkpoint_dir, "kynto_step*.pt"))
-
 resume_path = None
 
-if os.path.exists(latest_path):
-    resume_path = latest_path
-elif step_checkpoints:
+if step_checkpoints:
     resume_path = max(step_checkpoints, key=checkpoint_step)
 
 if resume_path:
     print(f"loading checkpoint: {resume_path}", flush=True)
 
-    ckpt = torch.load(resume_path, map_location=device)
+    # weights_only=False is needed for checkpoints that include config objects.
+    ckpt = torch.load(resume_path, map_location=device, weights_only=False)
 
-    model.load_state_dict(ckpt["model"])
+    # strict=False allows older checkpoints with RoPE cos/sin buffers to load.
+    model.load_state_dict(ckpt["model"], strict=False)
+
     optimizer.load_state_dict(ckpt["optimizer"])
 
-    # ✅ Start from next step so it does not repeat same checkpoint step
     start_step = int(ckpt["step"]) + 1
 
     print(f"resumed from {resume_path} at next step {start_step}", flush=True)
+    print(f"tokens already seen ≈ {start_step * tokens_per_update / 1e9:.2f}B", flush=True)
 else:
     print("no checkpoint found, starting from step 0", flush=True)
 
@@ -246,8 +255,12 @@ for step in range(start_step, max_iters):
         dt = time.time() - t0
 
         print(
-            f"step {step:>6} | train {loss_accum:.4f} | "
-            f"val {val_loss.item():.4f} | lr {lr:.2e} | {dt:.2f}s/step",
+            f"step {step:>6} | "
+            f"train {loss_accum:.4f} | "
+            f"val {val_loss.item():.4f} | "
+            f"lr {lr:.2e} | "
+            f"{dt:.2f}s/step | "
+            f"tokens {step * tokens_per_update / 1e9:.2f}B",
             flush=True,
         )
 
@@ -256,7 +269,7 @@ for step in range(start_step, max_iters):
 
 
 # -----------------------
-# SAVE FINAL
+# SAVE FINAL MODEL ONLY
 # -----------------------
 torch.save(model.state_dict(), "kynto.pt")
 print("saved kynto.pt", flush=True)

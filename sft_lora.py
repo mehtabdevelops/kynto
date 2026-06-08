@@ -38,7 +38,7 @@ model.print_trainable_parameters()
 
 # load data
 data = []
-with open('data_sft/combined_sft.jsonl') as f:
+with open('data_sft/combined_sft_v2.jsonl') as f:
     for line in f:
         try:
             ex  = json.loads(line)
@@ -52,7 +52,7 @@ print(f'loaded {len(data)} examples')
 
 optimizer = torch.optim.AdamW(
     filter(lambda p: p.requires_grad, model.parameters()),
-    lr=3e-4   # higher LR ok for LoRA
+    lr=1e-5   # higher LR ok for LoRA
 )
 
 model.train()
@@ -65,12 +65,17 @@ for epoch in range(3):
         with torch.autocast(device_type='cuda', dtype=torch.bfloat16):
             _, loss = model(x, y)
 
+        if torch.isnan(loss) or torch.isinf(loss):
+            continue
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
         optimizer.zero_grad(set_to_none=True)
         total += loss.item()
 
+        if step % 50000 == 0 and step > 0:
+            torch.save(model.state_dict(), f"kynto_sft_lora_step{step}.pt")
+            print(f"checkpoint saved step {step}", flush=True)
         if step % 200 == 0:
             print(f'epoch {epoch} step {step}/{len(data)} loss {loss.item():.4f}')
             torch.cuda.empty_cache()

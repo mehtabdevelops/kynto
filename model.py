@@ -2,6 +2,7 @@ from dataclasses import dataclass
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.checkpoint import checkpoint as grad_checkpoint
 
 
 # -----------------------
@@ -9,14 +10,15 @@ import torch.nn.functional as F
 # -----------------------
 @dataclass
 class KyntoConfig:
-    block_size: int = 1024
-    vocab_size: int = 50257
-    n_embd:     int = 1024
-    n_head:     int = 16
-    n_kv_head:  int = 4
-    n_layer:    int = 24
-    dropout:   float = 0.0
-    bias:      bool = False
+    block_size:      int   = 1024
+    vocab_size:      int   = 50257
+    n_embd:          int   = 1024
+    n_head:          int   = 16
+    n_kv_head:       int   = 4
+    n_layer:         int   = 24
+    dropout:         float = 0.0
+    bias:            bool  = False
+    use_checkpoint:  bool  = False  # gradient checkpointing to save activation memory
 
 
 # -----------------------
@@ -180,7 +182,10 @@ class Kynto(nn.Module):
         x = self.transformer.drop(self.transformer.wte(idx))
 
         for block in self.transformer.h:
-            x = block(x)
+            if self.config.use_checkpoint:
+                x = grad_checkpoint(block, x, use_reentrant=False)
+            else:
+                x = block(x)
 
         x = self.transformer.ln_f(x)
         logits = self.lm_head(x)
@@ -190,6 +195,7 @@ class Kynto(nn.Module):
             loss = F.cross_entropy(
                 logits.reshape(-1, logits.size(-1)),
                 targets.reshape(-1),
+                ignore_index=-100,   # ignores masked prompt tokens during SFT
             )
 
         return logits, loss

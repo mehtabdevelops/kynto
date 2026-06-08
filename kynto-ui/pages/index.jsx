@@ -83,6 +83,7 @@ export default function KyntoChat() {
       setChats(prev => prev.map(c => c.id === activeChatId ? { ...c, title: msg.slice(0, 28) } : c));
     }
     setLoading(true);
+    console.log("API URL:", process.env.NEXT_PUBLIC_API_URL);
 
     let reply = "Sorry, could not generate a response.";
     try {

@@ -1,0 +1,28 @@
+# Model files — stored on HuggingFace
+*.pt
+*.bin
+
+# Data files — too large
+data/
+data_sft/
+data_dpo/
+data_security/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# Node
+node_modules/
+.next/
+
+# Mac
+.DS_Store
+
+# Logs
+*.log
+nohup.out
+training_log.txt
+sft_log.txt
